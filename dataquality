@@ -1,0 +1,355 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Sat Sep 12 17:12:29 2020
+
+@author: patrick
+"""
+import pandas as pd
+import numpy as np
+class dataquality:
+    """This class allows to train historical dataset to understand its caracteristics,
+    with which it identifies problematic observations by column
+    if there is any date, this needs to be tranfered to interger before import into this module"""
+    def __init__(self, dataset):
+        """dataset is the sample or the whole population of data and the 
+        format is dataframe
+        ---------
+        Parameters
+        
+        tols : dict
+            It is a dictionary used for flagging the overview of data quality by
+            calculating the proportion of problematic observations.
+            eg.  {'Major': 0.25, 'Moderate': 0.1, 'Good': 0.05, 'Perfect': 0.01}
+            if the proportion is less than 0.01, the data qulity is indicated 
+            as Perfect;
+            if >=0.01 and <0.05 Good;
+            if >=0.05 and <0.1 Moderate;
+            if >=0.01 and <0.25 Major;
+            if >=0.25 Garbage;
+        percstat : list
+            It is a list of percentage used for calculating qunatiles in the 
+            statistics descriptive report of a dataset
+        tails : None or int
+            It is an element used for defining the number of distribution sides
+            in order to create a criticalzone in the function criticalzone()
+            and identify problematic observations in the funciton issuedetection().
+            The default is 2.
+        taildir : string
+            It is an element used for defining which tail is problematic zone
+            when the the tail number is 1. Only 2 values are allowed, left
+            or right. The default is None.
+        weightfeature : string, optional
+            It is the columns name in a dataset, and is used to calculate the
+            proportion of problematic observations. The data format of this 
+            feature must be numeric. The default is None.
+        """
+        self.dataset = dataset
+        self.fetauturesformat = pd.DataFrame()
+        self.featuresunique = []
+        self.tols = {'Perfect': 0.01, 'Good': 0.05, 'Moderate': 0.1, 'Major': 0.25}
+        self.percstat = [.01, .05, .25, .50, .75, .95, .99]
+        self.tails = 2
+        self.taildir = None
+        self.weightfeature = None
+    
+    def percstatupdate(self, perctemp):
+        """This class function allows to update the list of class characteristics
+        self.percstat
+        ----------
+        Parameters
+        
+        perctemp : list
+            the list is a list of floor digits between 0 and 1.
+            exemple perctemp = [.01, .05, .25, .50, .75, .95, .99]
+
+        Returns : None.
+        -------
+
+        """
+        # validate perctemp
+        if type(perctemp) != list:
+            print('Error: input format is supposed to be list!')
+            raise
+        # value is supposed tob e between 0 and 1
+        ls_temp = [value>=1 and value <=1 for value in perctemp]
+        if sum(ls_temp) > 0:
+            print('Error: input value is not supposed to out of the range [0, 1]')
+            raise
+        self.percstat = perctemp
+    
+    def tolsupdate(self, tolstemp):
+        """ This function allows to update the dictionary of class characterists
+        self.tols
+        ----------
+        Parameters
+        
+        tolstemp : dictionary
+            the key is a list of string.
+            the relevent value is a list of floor digits between 0 and 1
+            exemple tolstemp = {'Major': 0.25, 'Moderate': 0.1, 'Good': 0.05, 'Perfect': 0.01}
+            if <0.01 Perfect,
+            if >=0.01 and <0.05 Good
+            if >=0.05 and <0.1 Moderate
+            if >=0.01 and <0.25 Major
+            if >=0.25 Garbage
+        
+        Returns: None.
+        -------
+        
+        """
+        # validate tolstemp
+        # data format
+        if type(tolstemp) != dict:
+            print('Error: input format is supposed to be dict!')
+            raise
+        # relevent value is supposed to be between 0 and 1
+        ls_temp = [tol[1]>=0 and tol[1]<=1 for tol in tolstemp.items()]
+        if sum(ls_temp) > 0 :
+            print('Error: input value is not supposed to out of the range [0, 1]')
+            raise
+        #self.tols = sorted(self.tols.items(), key=lambda kv:kv[1], reverse=False)
+        self.tols = {k: v for k, v in sorted(tolstemp.items(), key=lambda item: item[1])}
+    
+    def updatetails(self, tailstemp):
+        """ This function allows to update the element of calsss characteristics
+        self.tails
+        ----------
+        Parameters
+        
+        tailstemp : int
+        
+        Returns: None
+        """
+        # validate tailstemp
+        if type(tailstemp) != int:
+            print('Error: input format is supposed to be int!')
+            raise
+        self.tails = tailstemp
+
+    def updatetaildir(self, taildirtemp):
+        """ This function allows to update the element of calsss characteristics
+        self.taildir
+        ----------
+        Parameters
+        
+        taildirtemp : str
+        
+        Returns: None
+        """
+        # validate tailstemp
+        if type(taildirtemp) != str:
+            print('Error: input format is supposed to be str!')
+            raise
+        if taildirtemp is not None:
+            if taildirtemp not in ['left', 'right']:
+                print('Error: input value is supposed to be left or right')
+                raise
+        self.taildir = taildirtemp
+
+    def updateweightfeature(self, weightfeaturetemp):
+        """ This function allows to update the element of calsss characteristics
+        self.weightfeature
+        ----------
+        Parameters
+        
+        weightfeaturetemp : str
+        
+        Returns: None
+        """
+        # validate tailstemp
+        if type(weightfeaturetemp) != str:
+            print('Error: input format is supposed to be str!')
+            raise
+        if weightfeaturetemp is not None:
+            if weightfeaturetemp not in self.dataset:
+                print('Error: input value is supposed to be a column name in the dataset')
+                print('column name: ' + self.dataset.columns)
+                raise
+        self.weightfeature = weightfeaturetemp
+    
+    def statreport(self):
+        """ This function allows to produce a statistic report of self.dataset
+        ----------
+        Parameters: N.A.
+        
+        Returns
+        
+        featurestatistic : DataFrame
+            This DataFrame provides a table of statistics, including quantile 
+            defined by self.percstat, number of nan value for each feature, type
+            of data format for each feature, number of observations, mean, 
+            standard deviation, min and max of observations for each feauture
+        featuresunique : list
+            Each element is a list of unique values for each feature  
+        -------
+        """
+        features = list(self.dataset.columns) # list
+        fetauturesformat = self.dataset.dtypes # series
+        # count nan value, missing value, blank for each observation. nan may be slaos missing or blank value
+        datatemp = self.dataset.apply(lambda x: x.isnull().sum(), axis=1) 
+        self.dataset.loc[:, 'nbmissing'] = datatemp
+        datatemp = 0
+        # count nan value for each column
+        nbmissingbycolumn = self.dataset.apply(lambda x: x.isnull().sum(), axis=0)
+        # make sure not to double count
+        featuresunique = []
+        include =['object', 'float', 'int']
+        #statfetaure = ["{:.0%}".format(x) for x in perc] + ['count', 'mean', 'std', 'min', 'max'] 
+        featurestatistic = self.dataset.describe(percentiles = self.percstat, include = include)
+        featurestatistic.loc['missing'] = nbmissingbycolumn
+        featurestatistic.loc['datatype'] = fetauturesformat
+        for feature in features:
+            datafeature = self.dataset[feature]
+            # # unique value for each feature
+            # pandas data types: https://pbpython.com/pandas_dtypes.html
+            if str(fetauturesformat[feature]) in ['int64', 'float64']:
+                # numeric data format
+                print('numeric data')
+                featuresunique.append([])
+            else:
+                # no numeric data format
+                featuresunique.append(datafeature.value_counts())
+        return featurestatistic, featuresunique
+    
+    def criticalzone(self, feature, criticalperct):
+        """This will define critical data zone for a feature in self.dataset
+        In this initial version, it is supposed to calculate quantile with the
+        hypothese of historical distribution.
+        In the future version, the analytical distribution hypothese will be 
+        applied.
+        ----------
+        Parameters
+        
+        feature : string
+            It is the column name in self.dataset for a feature.
+        critialperct : floor
+            It is the hypothese of problematic observations weight in the
+            whole dataset. The value is between 0 and 1. eg. 0.01, 0.05
+
+        
+        Returns
+        
+        zone: list or int or floor
+            It is the quantile, defined by crticalperct of a feature dataset.
+            If the tail number is 1, it returns a number; if it is 2, it returns
+            a list as the first element is left quantile and the second one is
+            right quantile.
+        -------    
+        """
+        # validate if feature is in self.dataset
+        if feature not in self.dataset.columns:
+            print('Error: The feauture does not exist!')
+            raise
+        sample = self.dataset[feature].values
+        left = np.quantile(sample, criticalperct*0.5)
+        right = np.quantile(sample, 1-criticalperct*0.5)
+        if self.weightfeature is not None:
+            print('The distribution weight is defined by the feature ' + self.weightfeature)
+            weightsample = self.dataset[[feature, self.weightfeature]]
+            weightfeaturesum = np.sum(weightsample[self.weightfeature].values)
+            leftsum = np.sum(weightsample[self.weightfeature][weightsample[feature]<=left].values)
+            rightsum = np.sum(weightsample[self.weightfeature][weightsample[feature]>=right].values)
+            weightsample = weightsample.sort_values(by=[feature])
+            weightsample['cum %'] = weightsample[self.weightfeature].cumsum()/weightfeaturesum
+            if leftsum/weightfeaturesum > criticalperct*0.5:
+                # recalculate left critical zone: sort by feature value, calculate cumsum and cum %
+                print('left')
+                left = weightsample[feature][weightsample['cum %'] <= criticalperct*0.5].max()
+            if rightsum/weightfeaturesum > criticalperct*0.5:
+                # recalculate right critical zone
+                print('right')
+                right = weightsample[feature][weightsample['cum %'] >= 1-criticalperct*0.5].min()
+
+        if self.tails == 2:
+            print('2 tails zones')
+            zone = [left, right]
+        elif self.tails == 1:
+            print('1 tail zone')
+            if self.taildir == 'left':
+                print('left tail')
+                zone = left
+            elif self.taildir == 'right':
+                print('right tail')
+                zone = right
+        return zone
+
+    def issuedetection(self, data, feature, criticalzone):
+        """
+        This function allows to assess the data and detect problematic observations
+        ----------
+        Parameters
+        
+        data: dataframe
+            It is a dataset that requires to assess data quality
+        feature: string
+            It is the column name in data for a feature
+        criticalzone: list or int or floor
+            It is the quantile of a feature dataset that different problematic
+            observastions and regular observations. If the tails is 2, it must
+            be a list to define both left and right quantiles; else, it must be
+            a numeric value for either left or right quantile.
+            
+        Returns
+        
+        qualityresult : string
+            It is a indicator of data quality defined in the dictionary self.tols.
+        weightissue : floor
+            It is the weight of problematic observations
+        datasample : dataframe
+            It is the orginal data with an additional column, named as Issue,
+            to identify if each observation is problematic
+        -------
+        """
+        # validate if feature is in self.dataset
+        if feature not in data.columns:
+            print('Error: The feauture does not exist!')
+            raise
+        # extract relevent data features
+        if self.weightfeature is not None:
+            datasample = data[[feature, self.weightfeature]]
+        else:
+            datasample = data[[feature]]
+        # define issues
+        if self.tails == 2:
+            left = criticalzone[0]
+            right = criticalzone[1]
+            print('2 tails zone')
+            datasample['Issue'] = datasample.apply(lambda x: x[feature] <= left or x[feature] >= right, index=1)
+        elif self.tails == 1:
+            print('1 tail zone')
+            if self.taildir == 'left':
+                datasample['Issue'] = datasample.apply(lambda x: x[feature] <= criticalzone, index=1)
+            elif self.taildir == 'right':
+                datasample['Issue'] = datasample.apply(lambda x: x[feature] >= criticalzone, index=1)
+ 
+        # calculate % of issues
+        if self.weightfeature is not None:
+            issueset = datasample[datasample['Issue'] == True]
+            sumissue = issueset[self.weightfeature].sum()
+            sum_observations = datasample[self.weightfeature].sum()
+            weightissue = sumissue/sum_observations
+        else:
+            nb_issues = datasample['Issue'].sum()
+            nb_observations = datasample['Issue'].count()
+            weightissue = nb_issues/nb_observations
+                
+        # assess quality according to tolerance
+        # sort tolerances dictionary from high % to low %
+        #tolerances = self.tols.items(), key=lambda kv:kv[1], reverse=False)
+        percs = [value[1] for value in self.tols.items()]
+        percs.append(1)
+        percs.insert(0, 0)
+        tollevels = [value[0] for value in self.tols.items()]
+        tollevels.append('Garbage')
+        intervals = list(zip(percs[:-1], percs[1:]))
+        ls_temp = [weightissue >= value[0] and weightissue < value[1] for value in intervals]
+        qualityresult = tollevels[np.where(ls_temp)[0][0]]
+        
+        return qualityresult, weightissue, datasample
+            
+                
+                
+                
+                
+                
